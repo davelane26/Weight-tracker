@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>David's Weight Dashboard</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+  :root {
+    --walmart-blue: #0053e2;
+    --walmart-blue-dark: #003db5;
+    --walmart-spark: #ffc220;
+    --gray-160: #1a1f36;
+    --gray-50: #c5c9d5;
+    --gray-10: #f5f6f8;
+  }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--gray-10); color: var(--gray-160); }
+  .kpi-card { transition: transform 0.2s, box-shadow 0.2s; }
+  .kpi-card:hover { transform: translateY(-3px); box-shadow: 0 8px 24px rgba(0,83,226,0.15); }
+  .drop-zone { border: 3px dashed #c5c9d5; border-radius: 1rem; padding: 2.5rem; text-align: center; transition: all 0.3s ease; cursor: pointer; background: white; }
+  .drop-zone:hover, .drop-zone.drag-active { border-color: #0053e2; background: #eff4ff; }
+  .drop-zone.drag-active { transform: scale(1.01); box-shadow: 0 8px 24px rgba(0,83,226,0.15); }
+  .gradient-header { background: linear-gradient(135deg, #0053e2 0%, #003db5 60%, #001a7a 100%); }
+  .spark-accent { background: #ffc220; }
+  .section-title { border-left: 4px solid #0053e2; padding-left: 12px; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+  .fade-in { animation: fadeIn 0.5s ease forwards; }
+</style>
+</head>
+<body class="min-h-screen">
+
+<!-- HEADER -->
+<header class="gradient-header text-white shadow-lg">
+  <div class="max-w-7xl mx-auto px-6 py-6 flex items-center justify-between flex-wrap gap-4">
+    <div class="flex items-center gap-4">
+      <div class="w-12 h-12 rounded-full spark-accent flex items-center justify-center text-2xl shadow-md">&#9878;&#65039;</div>
+      <div>
+        <h1 class="text-2xl font-bold tracking-tight">David's Weight Dashboard</h1>
+        <p class="text-blue-200 text-sm mt-0.5">openScale Health Tracker &middot; Powered by Code Puppy &#128054;</p>
+      </div>
+    </div>
+    <div class="text-right">
+      <p class="text-blue-200 text-xs uppercase tracking-widest">Last Updated</p>
+      <p class="text-white font-semibold text-sm" id="last-updated">No data loaded</p>
+      <p class="text-blue-300 text-xs mt-1" id="readings-count"></p>
+    </div>
+  </div>
+</header>
+
+<main class="max-w-7xl mx-auto px-6 py-8 space-y-8">
+
+  <!-- DROP ZONE (collapsed) -->
+  <div class="fade-in" style="animation-delay:0.12s">
+    <button onclick="document.getElementById('dropPanel').classList.toggle('hidden')" class="text-xs text-gray-400 hover:text-blue-600 transition flex items-center gap-1 mb-2">
+      &#128194; Import from file <span class="text-gray-300">▾</span>
+    </button>
+    <div id="dropPanel" class="hidden">
+      <div id="dropZone" class="drop-zone" style="padding:1.2rem">
+        <div class="flex items-center justify-center gap-3">
+          <p class="text-sm font-medium" style="color:#0053e2">Drop .xlsx / .csv here or <label for="fileInput" class="underline cursor-pointer">browse</label></p>
+          <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" class="hidden" />
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Upload status -->
+  <div id="uploadStatus" class="hidden bg-green-50 border border-green-200 rounded-xl p-4 flex gap-3 items-center">
+    <span class="text-xl">&#9989;</span>
+    <div>
+      <p class="font-bold text-green-800 text-sm" id="uploadFileName">File loaded!</p>
+      <p class="text-green-600 text-xs" id="uploadFileInfo"></p>
+    </div>
+  </div>
+
+  <!-- Error status -->
+  <div id="uploadError" class="hidden bg-red-50 border border-red-200 rounded-xl p-4 flex gap-3 items-start">
+    <span class="text-xl">&#10060;</span>
+    <div>
+      <p class="font-bold text-red-800 text-sm">Error loading file</p>
+      <p class="text-red-600 text-xs" id="uploadErrorMsg"></p>
+    </div>
+  </div>
+
+  <!-- KPI CARDS -->
+  <section class="fade-in" style="animation-delay:0.15s">
+    <h2 class="section-title text-xl font-bold text-gray-800 mb-4" id="kpiTitle">Latest Reading</h2>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4" id="kpiGrid">
+      <div class="kpi-card bg-white rounded-2xl shadow p-5 border-t-4" style="border-color:#0053e2">
+        <p class="text-xs font-semibold uppercase tracking-widest text-blue-600">Weight</p>
+        <p class="text-4xl font-extrabold mt-1" style="color:#0053e2" id="kpi-weight">&mdash;</p>
+        <p class="text-sm text-gray-500">lbs</p>
+        <div class="mt-3 text-xs text-gray-400 font-medium" id="kpi-weight-sub"></div>
+      </div>
+      <div class="kpi-card bg-white rounded-2xl shadow p-5 border-t-4" style="border-color:#ea1100">
+        <p class="text-xs font-semibold uppercase tracking-widest" style="color:#ea1100">BMI</p>
+        <p class="text-4xl font-extrabold mt-1" style="color:#ea1100" id="kpi-bmi">&mdash;</p>
+        <p class="text-sm text-gray-500">kg/m&sup2;</p>
+        <div class="mt-3" id="kpi-bmi-sub"></div>
+      </div>
+      <div class="kpi-card bg-white rounded-2xl shadow p-5 border-t-4" style="border-color:#ffc220">
+        <p class="text-xs font-semibold uppercase tracking-widest" style="color:#b07a00">Body Fat</p>
+        <p class="text-4xl font-extrabold mt-1" style="color:#995213" id="kpi-fat">&mdash;</p>
+        <p class="text-sm text-gray-500">of total weight</p>
+        <div class="mt-3" id="kpi-fat-sub"></div>
+      </div>
+      <div class="kpi-card bg-white rounded-2xl shadow p-5 border-t-4" style="border-color:#2a8703">
+        <p class="text-xs font-semibold uppercase tracking-widest text-green-700">Muscle</p>
+        <p class="text-4xl font-extrabold mt-1 text-green-700" id="kpi-muscle">&mdash;</p>
+        <p class="text-sm text-gray-500">skeletal muscle mass</p>
+        <div class="mt-3" id="kpi-muscle-sub"></div>
+      </div>
+      <div class="kpi-card bg-white rounded-2xl shadow p-5 border-t-4" style="border-color:#0891b2">
+        <p class="text-xs font-semibold uppercase tracking-widest text-cyan-700">Body Water</p>
+        <p class="text-4xl font-extrabold mt-1 text-cyan-700" id="kpi-water">&mdash;</p>
+        <p class="text-sm text-gray-500">of total weight</p>
+        <div class="mt-3" id="kpi-water-sub"></div>
+      </div>
+      <div class="kpi-card bg-white rounded-2xl shadow p-5 border-t-4 border-gray-300">
+        <p class="text-xs font-semibold uppercase tracking-widest text-gray-500">Bone Mass</p>
+        <p class="text-4xl font-extrabold mt-1 text-gray-700" id="kpi-bone">&mdash;</p>
+        <p class="text-sm text-gray-500">lbs</p>
+        <div class="mt-3" id="kpi-bone-sub"></div>
+      </div>
+      <div class="kpi-card bg-white rounded-2xl shadow p-5 border-t-4" style="border-color:#7c3aed">
+        <p class="text-xs font-semibold uppercase tracking-widest text-purple-600">BMR</p>
+        <p class="text-4xl font-extrabold mt-1 text-purple-700" id="kpi-bmr">&mdash;</p>
+        <p class="text-sm text-gray-500">kcal/day at rest</p>
+        <div class="mt-3"><span class="text-xs bg-purple-100 text-purple-700 font-medium px-2 py-0.5 rounded-full">Basal Metabolic Rate</span></div>
+      </div>
+      <div class="kpi-card bg-white rounded-2xl shadow p-5 border-t-4" style="border-color:#0053e2">
+        <p class="text-xs font-semibold uppercase tracking-widest text-blue-600">TDEE</p>
+        <p class="text-4xl font-extrabold mt-1" style="color:#0053e2" id="kpi-tdee">&mdash;</p>
+        <p class="text-sm text-gray-500">kcal/day total burn</p>
+        <div class="mt-3"><span class="text-xs bg-blue-100 text-blue-700 font-medium px-2 py-0.5 rounded-full">Total Daily Expenditure</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- JOURNEY PROGRESS -->
+  <section class="fade-in" style="animation-delay:0.18s">
+    <div class="bg-white rounded-2xl shadow p-6 border-l-4" style="border-color:#ffc220">
+      <h2 class="text-lg font-bold text-gray-800 mb-4">&#127942; Weight Loss Journey</h2>
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4 text-center">
+        <div class="rounded-xl p-4" style="background:#f5f6f8">
+          <p class="text-xs font-semibold uppercase tracking-widest text-gray-500 mb-1">Starting Weight</p>
+          <p class="text-3xl font-extrabold text-gray-700" id="journey-start">315.0</p>
+          <p class="text-xs text-gray-400 mt-1">Jan 23, 2026</p>
+        </div>
+        <div class="rounded-xl p-4" style="background:#eff4ff">
+          <p class="text-xs font-semibold uppercase tracking-widest text-blue-500 mb-1">Current Weight</p>
+          <p class="text-3xl font-extrabold" style="color:#0053e2" id="journey-current">&mdash;</p>
+          <p class="text-xs text-gray-400 mt-1" id="journey-date">Latest reading</p>
+        </div>
+        <div class="rounded-xl p-4" style="background:#f0fdf4">
+          <p class="text-xs font-semibold uppercase tracking-widest text-green-600 mb-1">Total Lost</p>
+          <p class="text-3xl font-extrabold text-green-700" id="journey-lost">0.0</p>
+          <p class="text-xs text-gray-400 mt-1">lbs lost</p>
+        </div>
+        <div class="rounded-xl p-4" style="background:#fefce8">
+          <p class="text-xs font-semibold uppercase tracking-widest text-amber-600 mb-1">Progress</p>
+          <p class="text-3xl font-extrabold" style="color:#995213" id="journey-pct">0%</p>
+          <p class="text-xs text-gray-400 mt-1">of starting weight</p>
+        </div>
+      </div>
+      <div class="mt-4"><div class="bg-gray-100 rounded-full h-4 overflow-hidden"><div class="h-full rounded-full transition-all duration-1000" id="journey-bar" style="width:0%; background: linear-gradient(90deg, #2a8703, #ffc220)"></div></div></div>
+      <p class="text-xs text-gray-400 mt-2 text-right" id="journey-bar-label"></p>
+    </div>
+  </section>
+
+  <!-- GOAL WEIGHT -->
+  <section class="fade-in" style="animation-delay:0.20s">
+    <div class="bg-white rounded-2xl shadow p-6 border-l-4" style="border-color:#0053e2">
+      <h2 class="text-lg font-bold text-gray-800 mb-4">&#127919; Goal Weight</h2>
+      <div class="flex flex-wrap items-center gap-4 mb-5">
+        <label class="text-sm font-semibold text-gray-600">Target Weight (lbs)</label>
+        <input type="number" id="goal-input" placeholder="e.g. 220" step="0.1" class="w-32 px-4 py-2.5 border-2 border-gray-200 rounded-xl text-lg font-bold text-center focus:border-blue-500 focus:outline-none transition" style="color:#0053e2" />
+        <button onclick="setGoal()" class="px-5 py-2.5 rounded-xl text-white font-bold text-sm transition hover:shadow-lg" style="background:#0053e2">Set Goal</button>
+        <button onclick="clearGoal()" class="px-4 py-2.5 rounded-xl text-gray-500 font-medium text-sm border border-gray-200 hover:border-red-300 hover:text-red-500 transition">Clear</button>
+      </div>
+      <div id="goal-content">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-center mb-4" id="goal-cards">
+          <div class="rounded-xl p-4" style="background:#eff4ff">
+            <p class="text-xs font-semibold uppercase tracking-widest text-blue-500 mb-1">Goal Weight</p>
+            <p class="text-3xl font-extrabold" style="color:#0053e2" id="goal-target">&mdash;</p>
+            <p class="text-xs text-gray-400 mt-1">lbs target</p>
+          </div>
+          <div class="rounded-xl p-4" style="background:#fefce8">
+            <p class="text-xs font-semibold uppercase tracking-widest text-amber-600 mb-1">Remaining</p>
+            <p class="text-3xl font-extrabold" style="color:#995213" id="goal-remaining">&mdash;</p>
+            <p class="text-xs text-gray-400 mt-1">lbs to go</p>
+          </div>
+          <div class="rounded-xl p-4" style="background:#f0fdf4">
+            <p class="text-xs font-semibold uppercase tracking-widest text-green-600 mb-1">Goal Progress</p>
+            <p class="text-3xl font-extrabold text-green-700" id="goal-pct">&mdash;</p>
+            <p class="text-xs text-gray-400 mt-1" id="goal-eta"></p>
+          </div>
+        </div>
+        <div class="bg-gray-100 rounded-full h-5 overflow-hidden">
+          <div class="h-full rounded-full transition-all duration-1000 flex items-center justify-center text-xs font-bold text-white" id="goal-bar" style="width:0%; background: linear-gradient(90deg, #0053e2, #00bcd4)"></div>
+        </div>
+        <div class="flex justify-between mt-2">
+          <span class="text-xs text-gray-400" id="goal-start-label">315.0 lbs</span>
+          <span class="text-xs font-semibold" style="color:#0053e2" id="goal-end-label">&mdash;</span>
+        </div>
+      </div>
+      <div id="goal-empty" class="text-center py-6 text-gray-400 text-sm">Enter a target weight above to track your progress</div>
+    </div>
+  </section>
+
+  <!-- WEIGHT CHART -->
+  <section class="bg-white rounded-2xl shadow p-6 fade-in" style="animation-delay:0.22s" id="chart-section">
+    <h2 class="section-title text-lg font-bold text-gray-800 mb-4">Weight Trend</h2>
+    <div style="height:320px"><canvas id="weightChart"></canvas></div>
+  </section>
+
+  <!-- WEEK OVER WEEK -->
+  <section id="wow-section" class="bg-white rounded-2xl shadow p-6 fade-in hidden" style="animation-delay:0.32s">
+    <h2 class="section-title text-lg font-bold text-gray-800 mb-4">Week-Over-Week Trends</h2>
+    <p class="text-xs text-gray-400 mb-4" id="wow-insight"></p>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead><tr class="text-left" style="background:#f5f6f8">
+          <th class="px-4 py-3 font-semibold text-gray-600">Week</th>
+          <th class="px-4 py-3 font-semibold text-gray-600 text-center">Readings</th>
+          <th class="px-4 py-3 font-semibold text-gray-600">Avg Weight</th>
+          <th class="px-4 py-3 font-semibold text-gray-600">Min</th>
+          <th class="px-4 py-3 font-semibold text-gray-600">Max</th>
+          <th class="px-4 py-3 font-semibold text-gray-600">Weekly &Delta;</th>
+          <th class="px-4 py-3 font-semibold text-gray-600">Avg Fat %</th>
+        </tr></thead>
+        <tbody id="wow-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- CALORIE INSIGHTS -->
+  <section class="bg-white rounded-2xl shadow p-6 fade-in" style="animation-delay:0.35s">
+    <h2 class="section-title text-lg font-bold text-gray-800 mb-4">Calorie &amp; Goal Insights</h2>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div class="rounded-xl p-5 text-center" style="background:#eff4ff"><p class="text-xs font-semibold uppercase tracking-widest text-blue-500 mb-1">Maintain Weight</p><p class="text-3xl font-extrabold" style="color:#0053e2" id="cal-maintain">&mdash;</p><p class="text-sm text-gray-500">kcal/day = TDEE</p></div>
+      <div class="rounded-xl p-5 text-center" style="background:#f0fdf4"><p class="text-xs font-semibold uppercase tracking-widest text-green-600 mb-1">Lose 1 lb/week</p><p class="text-3xl font-extrabold text-green-700" id="cal-lose1">&mdash;</p><p class="text-sm text-gray-500">kcal/day (&ndash;500 deficit)</p></div>
+      <div class="rounded-xl p-5 text-center" style="background:#fefce8"><p class="text-xs font-semibold uppercase tracking-widest text-amber-600 mb-1">Lose 2 lbs/week</p><p class="text-3xl font-extrabold" style="color:#995213" id="cal-lose2">&mdash;</p><p class="text-sm text-gray-500">kcal/day (&ndash;1,000 deficit)</p></div>
+    </div>
+  </section>
+
+  <footer class="text-center text-xs text-gray-400 pb-8">Generated by Code Puppy &#128054; &middot; Data from openScale</footer>
+</main>
+
+<script>
+const START_WEIGHT = 315.0;
+const START_DATE = 'Jan 23, 2026';
+let allData = [];
+let weightChart = null;
+
+// ── Helpers ────────────────────────────────────────
+function fmt(n, d=1) { return n != null ? n.toFixed(d) : '—'; }
+function fmtK(n) { return n != null ? n.toLocaleString('en-US', {maximumFractionDigits:0}) : '—'; }
+function fmtDate(d) {
+  if (!d) return '';
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return `${months[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+}
+function fmtTime(d) {
+  if (!d) return '';
+  let h = d.getHours(), m = d.getMinutes(), ap = h >= 12 ? 'PM' : 'AM';
+  h = h % 12 || 12;
+  return `${h}:${String(m).padStart(2,'0')} ${ap}`;
+}
+function parseDate(val) {
+  if (!val) return null;
+  if (val instanceof Date && !isNaN(val)) return val;
+  if (typeof val === 'number') { const d = new Date(Math.round((val - 25569) * 86400000)); return isNaN(d) ? null : d; }
+  const d = new Date(String(val)); return isNaN(d) ? null : d;
+}
+function bmiCategory(bmi) {
+  if (bmi < 18.5) return ['Underweight', 'bg-blue-100 text-blue-700'];
+  if (bmi < 25) return ['Normal', 'bg-green-100 text-green-700'];
+  if (bmi < 30) return ['Overweight', 'bg-yellow-100 text-yellow-700'];
+  if (bmi < 35) return ['Class I Obesity', 'bg-orange-100 text-orange-700'];
+  if (bmi < 40) return ['Class II Obesity', 'bg-red-100 text-red-700'];
+  return ['Class III Obesity', 'bg-red-200 text-red-900'];
+}
+
+// ── Drag & Drop ────────────────────────────────────
+const dz = document.getElementById('dropZone');
+const fi = document.getElementById('fileInput');
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-active'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('drag-active'));
+dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('drag-active'); handleFile(e.dataTransfer.files[0]); });
+fi.addEventListener('change', e => { handleFile(e.target.files[0]); e.target.value = ''; });
+
+function handleFile(file) {
+  if (!file) return;
+  document.getElementById('uploadStatus').classList.add('hidden');
+  document.getElementById('uploadError').classList.add('hidden');
+  const name = file.name.toLowerCase();
+  if (name.endsWith('.csv')) {
+    const r = new FileReader();
+    r.onload = ev => parseCSV(ev.target.result, file.name);
+    r.readAsText(file);
+  } else {
+    const r = new FileReader();
+    r.onload = ev => parseExcel(new Uint8Array(ev.target.result), file.name);
+    r.readAsArrayBuffer(file);
+  }
+}
+
+function showSuccess(fileName, count) {
+  const s = document.getElementById('uploadStatus');
+  document.getElementById('uploadFileName').textContent = fileName + ' loaded!';
+  document.getElementById('uploadFileInfo').textContent = count + ' readings imported';
+  s.classList.remove('hidden');
+  document.getElementById('uploadError').classList.add('hidden');
+}
+function showError(msg) {
+  document.getElementById('uploadErrorMsg').textContent = msg;
+  document.getElementById('uploadError').classList.remove('hidden');
+  document.getElementById('uploadStatus').classList.add('hidden');
+}
+
+// ── Parse Excel ────────────────────────────────────
+function parseExcel(buffer, fileName) {
+  try {
+    let rows = [];
+    for (const opts of [{ cellDates: true }, { cellDates: false }]) {
+      const wb = XLSX.read(buffer, { type: 'array', cellDates: opts.cellDates });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const json = XLSX.utils.sheet_to_json(ws, { defval: null });
+      if (!json.length) continue;
+      const colMap = {};
+      Object.keys(json[0]).forEach(k => { colMap[k.toUpperCase().trim()] = k; });
+      const dateKey = colMap['DATE'];
+      if (!dateKey) continue;
+      rows = json.map(r => {
+        const date = parseDate(r[dateKey]);
+        if (!date) return null;
+        // Parse time if available
+        const timeKey = colMap['TIME'];
+        if (timeKey && r[timeKey]) {
+          const tv = r[timeKey];
+          if (tv instanceof Date) { date.setHours(tv.getHours(), tv.getMinutes(), tv.getSeconds()); }
+          else if (typeof tv === 'number') { const totalSec = Math.round(tv * 86400); date.setHours(Math.floor(totalSec/3600), Math.floor((totalSec%3600)/60), totalSec%60); }
+          else if (typeof tv === 'string') { const m = tv.match(/(\d+):(\d+)/); if(m) date.setHours(+m[1], +m[2]); }
+        }
+        return {
+          date,
+          weight: parseFloat(r[colMap['WEIGHT']]) || null,
+          bmi: parseFloat(r[colMap['BMI']]) || null,
+          bmr: parseFloat(r[colMap['BMR']]) || null,
+          bodyFat: parseFloat(r[colMap['BODY_FAT']]) || null,
+          bone: parseFloat(r[colMap['BONE']]) || null,
+          muscle: parseFloat(r[colMap['MUSCLE']]) || null,
+          tdee: parseFloat(r[colMap['TDEE']]) || null,
+          water: parseFloat(r[colMap['WATER']]) || null,
+        };
+      }).filter(r => r && r.weight);
+      if (rows.length) break;
+    }
+    if (!rows.length) { showError('No valid data found. Need DATE and WEIGHT columns.'); return; }
+    rows.sort((a, b) => a.date - b.date);
+    allData = rows;
+    showSuccess(fileName, rows.length);
+    renderAll();
+  } catch (e) { showError('Could not read file: ' + e.message); console.error(e); }
+}
+
+// ── Parse CSV ──────────────────────────────────────
+function parseCSV(text, fileName) {
+  const lines = text.trim().split(/\r?\n/);
+  if (lines.length < 2) { showError('CSV is empty'); return; }
+  const headers = lines[0].split(',').map(h => h.trim().toUpperCase().replace(/"/g, ''));
+  const di = headers.indexOf('DATE'), wi = headers.indexOf('WEIGHT');
+  if (di < 0 || wi < 0) { showError('CSV needs DATE and WEIGHT columns'); return; }
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const parts = lines[i].split(',').map(p => p.trim().replace(/"/g, ''));
+    const date = parseDate(parts[di]);
+    const weight = parseFloat(parts[wi]);
+    if (date && !isNaN(weight)) rows.push({ date, weight, bmi: null, bmr: null, bodyFat: null, bone: null, muscle: null, tdee: null, water: null });
+  }
+  if (!rows.length) { showError('No valid data in CSV'); return; }
+  rows.sort((a, b) => a.date - b.date);
+  allData = rows;
+  showSuccess(fileName, rows.length);
+  renderAll();
+}
+
+// ── Render Everything ──────────────────────────────
+function renderAll() {
+  if (!allData.length) return;
+  const latest = allData[allData.length - 1];
+  const first = allData[0];
+
+  // Header
+  document.getElementById('last-updated').textContent = fmtDate(latest.date) + ' · ' + fmtTime(latest.date);
+  // Count readings today
+  const todayStr = latest.date.toDateString();
+  const todayCount = allData.filter(r => r.date.toDateString() === todayStr).length;
+  document.getElementById('readings-count').textContent = todayCount + ' reading' + (todayCount !== 1 ? 's' : '') + ' today';
+  document.getElementById('kpiTitle').textContent = 'Latest Reading — ' + fmtTime(latest.date);
+
+  // KPI Cards
+  const prev = allData.length > 1 ? allData[allData.length - 2] : null;
+
+  document.getElementById('kpi-weight').textContent = fmt(latest.weight);
+  const wSub = document.getElementById('kpi-weight-sub');
+  if (prev) {
+    const wd = latest.weight - prev.weight;
+    wSub.innerHTML = `<span class="${wd <= 0 ? 'text-green-700' : 'text-red-600'}">&#${wd <= 0 ? '9660' : '9650'}; ${fmt(Math.abs(wd))} lbs from last reading</span>`;
+  }
+
+  document.getElementById('kpi-bmi').textContent = fmt(latest.bmi, 2);
+  if (latest.bmi) {
+    const [cat, cls] = bmiCategory(latest.bmi);
+    let bmiSub = `<span class="text-xs ${cls} font-medium px-2 py-0.5 rounded-full">${cat}</span>`;
+    if (prev && prev.bmi) {
+      const bd = latest.bmi - prev.bmi;
+      bmiSub += ` <span class="text-xs ${bd <= 0 ? 'text-green-700' : 'text-red-600'} font-medium ml-1">${bd <= 0 ? '▼' : '▲'} ${fmt(Math.abs(bd), 2)}</span>`;
+    }
+    document.getElementById('kpi-bmi-sub').innerHTML = bmiSub;
+  }
+
+  document.getElementById('kpi-fat').textContent = latest.bodyFat ? fmt(latest.bodyFat) + '%' : '—';
+  if (latest.bodyFat && latest.weight) {
+    const fatMass = (latest.bodyFat / 100) * latest.weight;
+    let fatSub = `<span class="text-xs bg-amber-100 text-amber-800 font-medium px-2 py-0.5 rounded-full">&asymp; ${fmt(fatMass)} lbs fat mass</span>`;
+    if (prev && prev.bodyFat) {
+      const fd = latest.bodyFat - prev.bodyFat;
+      fatSub += ` <span class="text-xs ${fd <= 0 ? 'text-green-700' : 'text-red-600'} font-medium ml-1">${fd <= 0 ? '▼' : '▲'} ${fmt(Math.abs(fd))}%</span>`;
+    }
+    document.getElementById('kpi-fat-sub').innerHTML = fatSub;
+  }
+
+  document.getElementById('kpi-muscle').textContent = latest.muscle ? fmt(latest.muscle) + '%' : '—';
+  if (latest.muscle && latest.weight) {
+    const mm = (latest.muscle / 100) * latest.weight;
+    let mSub = `<span class="text-xs bg-green-100 text-green-800 font-medium px-2 py-0.5 rounded-full">&asymp; ${fmt(mm)} lbs</span>`;
+    if (prev && prev.muscle) {
+      const md = latest.muscle - prev.muscle;
+      mSub += ` <span class="text-xs ${md >= 0 ? 'text-green-700' : 'text-red-600'} font-medium ml-1">${md >= 0 ? '▲' : '▼'} ${fmt(Math.abs(md))}%</span>`;
+    }
+    document.getElementById('kpi-muscle-sub').innerHTML = mSub;
+  }
+
+  document.getElementById('kpi-water').textContent = latest.water ? fmt(latest.water) + '%' : '—';
+  if (latest.water && latest.weight) {
+    const wm = (latest.water / 100) * latest.weight;
+    let waSub = `<span class="text-xs bg-cyan-100 text-cyan-800 font-medium px-2 py-0.5 rounded-full">&asymp; ${fmt(wm)} lbs</span>`;
+    if (prev && prev.water) {
+      const wad = latest.water - prev.water;
+      waSub += ` <span class="text-xs ${wad >= 0 ? 'text-green-700' : 'text-red-600'} font-medium ml-1">${wad >= 0 ? '▲' : '▼'} ${fmt(Math.abs(wad))}%</span>`;
+    }
+    document.getElementById('kpi-water-sub').innerHTML = waSub;
+  }
+
+  document.getElementById('kpi-bone').textContent = latest.bone ? fmt(latest.bone, 2) : '—';
+  if (latest.bone && latest.weight) {
+    const bp = ((latest.bone / latest.weight) * 100);
+    let bSub = `<span class="text-xs bg-gray-100 text-gray-600 font-medium px-2 py-0.5 rounded-full">&asymp; ${fmt(bp)}% body weight</span>`;
+    if (prev && prev.bone) {
+      const boned = latest.bone - prev.bone;
+      bSub += ` <span class="text-xs text-gray-500 font-medium ml-1">${boned >= 0 ? '▲' : '▼'} ${fmt(Math.abs(boned), 2)}</span>`;
+    }
+    document.getElementById('kpi-bone-sub').innerHTML = bSub;
+  }
+
+  document.getElementById('kpi-bmr').textContent = latest.bmr ? fmtK(latest.bmr) : '—';
+  document.getElementById('kpi-tdee').textContent = latest.tdee ? fmtK(latest.tdee) : '—';
+
+  // Journey
+  document.getElementById('journey-current').textContent = fmt(latest.weight);
+  document.getElementById('journey-date').textContent = fmtDate(latest.date);
+  const lost = START_WEIGHT - latest.weight;
+  document.getElementById('journey-lost').textContent = fmt(Math.max(0, lost));
+  const pct = ((lost / START_WEIGHT) * 100);
+  document.getElementById('journey-pct').textContent = fmt(Math.max(0, pct)) + '%';
+  document.getElementById('journey-bar').style.width = Math.min(100, Math.max(0, pct)) + '%';
+  document.getElementById('journey-bar-label').textContent = `${fmt(latest.weight)} lbs current · ${fmt(Math.max(0, lost))} lbs lost of ${START_WEIGHT} lbs start`;
+
+  // Calories
+  if (latest.tdee) {
+    document.getElementById('cal-maintain').textContent = fmtK(latest.tdee);
+    document.getElementById('cal-lose1').textContent = fmtK(latest.tdee - 500);
+    document.getElementById('cal-lose2').textContent = fmtK(latest.tdee - 1000);
+  }
+
+  renderChart();
+  renderWoW();
+  renderGoal();
+}
+
+// ── Goal Weight ────────────────────────────────────
+let goalWeight = null;
+function loadGoal() {
+  try { const g = localStorage.getItem('wt_goal_weight'); if (g) { goalWeight = parseFloat(g); document.getElementById('goal-input').value = goalWeight; } } catch {}
+}
+function setGoal() {
+  const v = parseFloat(document.getElementById('goal-input').value);
+  if (isNaN(v) || v <= 0) return;
+  goalWeight = v;
+  localStorage.setItem('wt_goal_weight', goalWeight);
+  renderGoal();
+}
+function clearGoal() {
+  goalWeight = null;
+  document.getElementById('goal-input').value = '';
+  localStorage.removeItem('wt_goal_weight');
+  renderGoal();
+}
+function renderGoal() {
+  const content = document.getElementById('goal-content');
+  const empty = document.getElementById('goal-empty');
+  if (!goalWeight) {
+    content.style.display = 'none';
+    empty.style.display = 'block';
+    return;
+  }
+  content.style.display = 'block';
+  empty.style.display = 'none';
+
+  document.getElementById('goal-target').textContent = fmt(goalWeight);
+  document.getElementById('goal-end-label').textContent = fmt(goalWeight) + ' lbs goal';
+  document.getElementById('goal-start-label').textContent = START_WEIGHT + ' lbs start';
+
+  if (allData.length) {
+    const latest = allData[allData.length - 1];
+    const remaining = Math.max(0, latest.weight - goalWeight);
+    const totalToLose = START_WEIGHT - goalWeight;
+    const lost = START_WEIGHT - latest.weight;
+    const pct = totalToLose > 0 ? Math.min(100, Math.max(0, (lost / totalToLose) * 100)) : 0;
+
+    document.getElementById('goal-remaining').textContent = fmt(remaining);
+    document.getElementById('goal-pct').textContent = fmt(pct, 0) + '%';
+    document.getElementById('goal-bar').style.width = pct + '%';
+    document.getElementById('goal-bar').textContent = pct >= 10 ? fmt(pct, 0) + '%' : '';
+
+    // Estimate weeks to goal at 2 lbs/week target rate
+    if (remaining > 0) {
+      const ratePerWeek = 2.0;
+      const weeksLeft = Math.ceil(remaining / ratePerWeek);
+      const daysLeft = weeksLeft * 7;
+      const estDate = new Date(latest.date.getTime() + daysLeft * 86400000);
+      document.getElementById('goal-eta').textContent = `~${weeksLeft} week${weeksLeft !== 1 ? 's' : ''} at 2 lbs/wk · est. ${fmtDate(estDate)}`;
+    } else if (remaining <= 0) {
+      document.getElementById('goal-pct').textContent = '100%';
+      document.getElementById('goal-eta').textContent = '🎉 Goal reached!';
+      document.getElementById('goal-remaining').textContent = '0.0';
+      document.getElementById('goal-bar').style.width = '100%';
+      document.getElementById('goal-bar').textContent = '100%';
+    }
+  }
+}
+
+// ── Weight Chart ───────────────────────────────────
+function renderChart() {
+  if (weightChart) { weightChart.destroy(); weightChart = null; }
+  // Use one reading per day (last of day)
+  const byDay = {};
+  allData.forEach(r => { const k = r.date.toDateString(); byDay[k] = r; });
+  const daily = Object.values(byDay).sort((a, b) => a.date - b.date);
+  const labels = daily.map(r => fmtDate(r.date));
+  const data = daily.map(r => r.weight);
+
+  const ctx = document.getElementById('weightChart').getContext('2d');
+  const grad = ctx.createLinearGradient(0, 0, 0, 320);
+  grad.addColorStop(0, 'rgba(0,83,226,0.12)'); grad.addColorStop(1, 'rgba(0,83,226,0)');
+
+  weightChart = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets: [{
+      label: 'Weight', data, borderColor: '#0053e2', backgroundColor: grad, fill: true,
+      tension: 0.35, pointRadius: daily.length < 30 ? 5 : 2, pointHoverRadius: 7,
+      pointBackgroundColor: '#0053e2', pointBorderColor: '#fff', pointBorderWidth: 2, borderWidth: 2.5
+    }]},
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: {
+        backgroundColor: '#1a1f36', titleColor: '#fff', bodyColor: '#ddd', padding: 12, cornerRadius: 10,
+        callbacks: { label: c => `  ${c.parsed.y.toFixed(1)} lbs` }
+      }},
+      scales: {
+        x: { ticks: { color: '#6d7a95', font: { size: 11 }, maxRotation: 45, autoSkip: true, maxTicksLimit: 10 }, grid: { color: '#eee' } },
+        y: { ticks: { color: '#6d7a95', font: { size: 11 }, callback: v => v + ' lbs' }, grid: { color: '#eee' } }
+      }
+    }
+  });
+}
+
+// ── Week Over Week ─────────────────────────────────
+function renderWoW() {
+  const sec = document.getElementById('wow-section');
+  if (allData.length < 2) { sec.classList.add('hidden'); return; }
+  sec.classList.remove('hidden');
+
+  const weeks = {};
+  allData.forEach(r => {
+    const d = new Date(r.date);
+    d.setDate(d.getDate() - d.getDay());
+    // Use local date, not UTC
+    const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    if (!weeks[k]) weeks[k] = [];
+    weeks[k].push(r);
+  });
+
+  const wks = Object.keys(weeks).sort().reverse();
+  const tbody = document.getElementById('wow-body');
+  tbody.innerHTML = '';
+
+  let prevAvg = null;
+  const rows = wks.map(wk => {
+    const rs = weeks[wk];
+    // Sort readings within the week by date
+    rs.sort((a, b) => a.date - b.date);
+    const avg = rs.reduce((s, r) => s + r.weight, 0) / rs.length;
+    const min = Math.min(...rs.map(r => r.weight));
+    const max = Math.max(...rs.map(r => r.weight));
+    const fatVals = rs.filter(r => r.bodyFat).map(r => r.bodyFat);
+    const avgFat = fatVals.length ? fatVals.reduce((s, v) => s + v, 0) / fatVals.length : null;
+    // Weight change within the week: last reading - first reading
+    const weekDiff = rs.length > 1 ? rs[rs.length - 1].weight - rs[0].weight : 0;
+    return { wk, count: rs.length, avg, min, max, avgFat, weekDiff };
+  }).reverse();
+
+  // Insight
+  if (rows.length >= 2) {
+    const lastW = rows[rows.length - 1], prevW = rows[rows.length - 2];
+    const diff = lastW.avg - prevW.avg;
+    document.getElementById('wow-insight').textContent = diff <= 0
+      ? `Down ${fmt(Math.abs(diff))} lbs average this week vs last week.`
+      : `Up ${fmt(diff)} lbs average this week vs last week.`;
+  }
+
+  rows.forEach((r, i) => {
+    const wkDate = new Date(r.wk + 'T00:00:00');
+    const wkEnd = new Date(wkDate); wkEnd.setDate(wkEnd.getDate() + 6);
+    const tr = document.createElement('tr');
+    tr.className = 'border-b border-gray-100 hover:bg-gray-50 transition';
+    const wd = r.weekDiff;
+    tr.innerHTML = `
+      <td class="px-4 py-3"><span class="font-medium">${fmtDate(wkDate)}</span><br><span class="text-xs text-gray-400">${fmtDate(wkDate)} – ${fmtDate(wkEnd)}</span></td>
+      <td class="px-4 py-3 text-center"><span class="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded-full">${r.count}</span></td>
+      <td class="px-4 py-3 font-bold">${fmt(r.avg)}</td>
+      <td class="px-4 py-3">${fmt(r.min)}</td>
+      <td class="px-4 py-3">${fmt(r.max)}</td>
+      <td class="px-4 py-3">${wd === 0 ? '<span class="text-gray-400">0.0</span>' : `<span class="${wd <= 0 ? 'text-green-700' : 'text-red-600'} font-semibold">${wd <= 0 ? '▼' : '▲'} ${fmt(Math.abs(wd))}</span>`}</td>
+      <td class="px-4 py-3">${r.avgFat != null ? fmt(r.avgFat) + '%' : '<span class="text-gray-300">—</span>'}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+
+// ── Load saved data ────────────────────────────────
+loadGoal();
+
+// Try loading from data.json (written by MQTT bridge), fallback to localStorage
+function fixDateStr(d) {
+  // openScale sends "2026-03-21T09:53-0600" — browsers need "2026-03-21T09:53-06:00"
+  if (typeof d === 'string') {
+    // Add colon to timezone offset if missing: -0600 -> -06:00
+    return d.replace(/([+-]\d{2})(\d{2})$/, '$1:$2');
+  }
+  return d;
+}
+
+async function loadFromJSON() {
+  try {
+    const resp = await fetch('data.json?t=' + Date.now());
+    if (!resp.ok) return false;
+    const data = await resp.json();
+    if (!data.length) return false;
+    allData = data.map(r => ({ ...r, date: new Date(fixDateStr(r.date)) }))
+                   .filter(r => !isNaN(r.date));
+    renderAll();
+    return true;
+  } catch { return false; }
+}
+
+async function init() {
+  const loaded = await loadFromJSON();
+  if (!loaded) {
+    try {
+      const saved = localStorage.getItem('wt_dashboard_data');
+      if (saved) { allData = JSON.parse(saved).map(r => ({ ...r, date: new Date(r.date) })); renderAll(); }
+      else { renderGoal(); }
+    } catch { renderGoal(); }
+  }
+}
+init();
+
+// Poll for updates every 30 seconds
+setInterval(loadFromJSON, 30000);
+
+// Save after import
+const origRenderAll = renderAll;
+renderAll = function() {
+  origRenderAll();
+  try { localStorage.setItem('wt_dashboard_data', JSON.stringify(allData)); } catch {}
+};
+</script>
+</body>
+</html>
